@@ -1,0 +1,6 @@
+0 Vegetable
+1 Fruit
+2 Meat
+3 Seafood
+4 Others
+5 Trash
