@@ -1,0 +1,24 @@
+from playwright.sync_api import sync_playwright
+
+# Thay link thịt hoặc hải sản vào đây để soi
+url = "https://gia247.com/gia-cac-loai-thit-hom-nay/" 
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
+    page = browser.new_page()
+    page.goto(url, timeout=60000, wait_until='domcontentloaded')
+    page.wait_for_selector('table', timeout=15000)
+    
+    # Lấy các hàng trong bảng
+    rows = page.query_selector_all('tr')
+    
+    for row in rows:
+        cells = row.query_selector_all('td')
+        # Bỏ qua hàng tiêu đề, chỉ lấy hàng có chứa dữ liệu thực tế
+        if len(cells) > 2:
+            print("\n--- KẾT QUẢ SOI CỘT DÒNG ĐẦU TIÊN ---")
+            for i, cell in enumerate(cells):
+                print(f"Cột [ {i} ]: {cell.inner_text().strip()}")
+            break # Chỉ in 1 dòng rồi dừng
+            
+    browser.close()

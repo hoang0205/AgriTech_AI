@@ -1,4 +1,4 @@
-name: Daily Vegetable Price Scraper
+name: Daily Market Price Scraper
 
 on:
   schedule:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   scrape_and_save:
-    runs-on: ubuntu-latest # Sử dụng hệ điều hành Ubuntu mới nhất của GitHub
+    runs-on: ubuntu-latest
     
     steps:
       - name: Checkout repository
@@ -34,7 +34,5 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          
-          git add PricePrediction/vegetable_prices.csv
-          
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update: Daily vegetable prices $(date +'%Y-%m-%d')" && git push)
+          git add PricePrediction/market_prices.csv
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update: Market prices $(date +'%Y-%m-%d')" && git push)
