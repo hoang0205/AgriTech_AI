@@ -1,8 +1,10 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import tensorflow as tf
 from PIL import Image
 import numpy as np
+import requests
 import io
 
 app = FastAPI(title="AgriTech AI API")
@@ -17,8 +19,11 @@ app.add_middleware(
 
 model = tf.keras.models.load_model("ImageDetection/keras_model.h5", compile=False)
 
-with open("ImageDetection/labels.txt", "r") as f:
+with open("ImageDetection/labels.txt", "r", encoding="utf-8") as f:
     labels = [line.strip() for line in f.readlines()]
+
+class ImageRequest(BaseModel):
+    image_url: str
 
 def preprocess_image(image_bytes):
     image = Image.open(io.BytesFile(image_bytes)).convert("RGB")
@@ -28,9 +33,12 @@ def preprocess_image(image_bytes):
     return img_array
 
 @app.post("/api/predict-image")
-async def predict_image(file: UploadFile = File(...)):
+async def predict_image(request: ImageRequest):
     try:
-        contents = await file.read()
+        response = requests.get(request.image_url)
+        response.raise_for_status() 
+        contents = response.content
+        
         img_array = preprocess_image(contents)
         
         predictions = model.predict(img_array)
