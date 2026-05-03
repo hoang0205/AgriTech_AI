@@ -15,14 +15,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-model = tf.keras.models.load_model("ImageDetection/keras_model.h5")
+model = tf.keras.models.load_model("ImageDetection/keras_model.h5", compile=False)
 
 with open("ImageDetection/labels.txt", "r") as f:
     labels = [line.strip() for line in f.readlines()]
 
 def preprocess_image(image_bytes):
     image = Image.open(io.BytesFile(image_bytes)).convert("RGB")
-    image = image.resize((224, 224)) # Đổi lại size tùy model của ông
+    image = image.resize((224, 224))
     img_array = np.array(image) / 255.0
     img_array = np.expand_dims(img_array, axis=0)
     return img_array
