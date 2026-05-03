@@ -26,7 +26,7 @@ class ImageRequest(BaseModel):
     image_url: str
 
 def preprocess_image(image_bytes):
-    image = Image.open(io.BytesFile(image_bytes)).convert("RGB")
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     image = image.resize((224, 224))
     img_array = np.array(image) / 255.0
     img_array = np.expand_dims(img_array, axis=0)
