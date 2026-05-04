@@ -35,14 +35,14 @@ try:
     image_model = tf.keras.models.load_model(image_model_path, compile=False)
     with open(label_path, "r", encoding="utf-8") as f:
         labels = [line.strip() for line in f.readlines()]
-    print("✅ Đã nạp thành công mô hình Nhận diện ảnh!")
+    print("Nạp thành công mô hình Nhận diện ảnh!")
 except Exception as e:
-    print(f"❌ Lỗi tải mô hình Nhận diện ảnh: {e}")
+    print(f"Lỗi tải mô hình Nhận diện ảnh: {e}")
 
 # Setup Gemini
 API_KEY = os.getenv("GENAI_API_KEY")
 if not API_KEY:
-    print("❌ CẢNH BÁO: Chưa tìm thấy GENAI_API_KEY trong file .env!")
+    print("Chưa tìm thấy file .env!")
 else:
     genai.configure(api_key=API_KEY)
     valid_models = [m.name.replace('models/', '') for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
@@ -57,7 +57,7 @@ try:
     product_dict = {str(item).lower(): str(item) for item in prod_encoder.classes_}
     print("✅ Đã nạp thành công mô hình Dự đoán giá!")
 except Exception as e:
-    print(f"❌ Lỗi tải mô hình Dự đoán giá: {e}")
+    print(f"Lỗi tải mô hình Dự đoán giá: {e}")
 
 
 
@@ -65,7 +65,7 @@ class ImageRequest(BaseModel):
     image_url: str
 
 class PriceQueryRequest(BaseModel):
-    user_text: str
+    product_name: str
 
 @app.get("/")
 def home():
@@ -102,49 +102,55 @@ async def predict_image(request: ImageRequest):
 @app.post("/api/predict-price")
 async def predict_price(request: PriceQueryRequest):
     try:
-        user_input = request.user_text
-        
-        extract_prompt = f"Trích xuất tên món ăn, thịt, cá, rau củ trong câu: '{user_input}'. Trả về 1 từ khóa viết thường, không giải thích."
-        keyword = chat_model.generate_content(extract_prompt).text.strip().lower()
+        keyword = request.product_name.strip().lower()
         
         matched_products = [real_name for lower_name, real_name in product_dict.items() if keyword in lower_name]
 
         if not matched_products:
-            search_prompt = f"Mặt hàng '{keyword}'. Tự ước tính mức giá bán lẻ hiện hành tại Việt Nam. Format: Tên món: [Giá] VNĐ/kg."
+            search_prompt = f"""
+            Từ khóa: '{keyword}'.
+            Nhiệm vụ 1: Kiểm tra xem đây có đúng là tên một loại thực phẩm, nông sản, thịt, cá, hải sản hoặc rau củ quả không. 
+            Nếu KHÔNG PHẢI (ví dụ: đồ điện tử, đồ gia dụng, từ vô nghĩa, từ bậy bạ...), hãy trả về ĐÚNG 1 TỪ: INVALID
+            
+            Nhiệm vụ 2: Nếu ĐÚNG là nông sản/thực phẩm, hãy ước tính giá bán lẻ hiện hành tại Việt Nam (VNĐ/kg).
+            LUẬT TỐI THƯỢNG: CHỈ in ra một con số hoặc một khoảng số. 
+            Ví dụ đúng: '50000' hoặc '55000 - 60000'
+            TUYỆT ĐỐI KHÔNG in chữ 'VNĐ', KHÔNG in 'kg', KHÔNG giải thích gì thêm.
+            """
             reply = chat_model.generate_content(search_prompt).text.strip()
+
+            if "INVALID" in reply.upper():
+                return {
+                    "success": False,
+                    "error": "Từ khóa không hợp lệ. Vui lòng chỉ nhập tên nông sản, thực phẩm."
+                }
+
             return {
                 "success": True,
-                "source": "llm_estimation",
-                "keyword": keyword,
-                "data": [{"product_name": keyword, "predicted_price_vnd": reply}]
+                "product_name": keyword,
+                "price": reply 
             }
 
         today = datetime.now()
-        results = []
-
-        for product_name in matched_products:
-            product_history = df_prices[df_prices['product_name'] == product_name]
-            if product_history.empty: continue
-            
-            latest_data = product_history.iloc[-1]
-            prod_encoded = prod_encoder.transform([product_name])[0]
-            
-            question = pd.DataFrame(
-                [[today.day, today.weekday(), 0, prod_encoded, latest_data['price_hcm'], latest_data['price_hn']]], 
-                columns=['day', 'day_of_week', 'category_encoded', 'product_encoded', 'price_hcm', 'price_hn']
-            )
-            
-            predicted_price = int(price_model.predict(question)[0])
-            results.append({
-                "product_name": product_name,
-                "predicted_price_vnd": predicted_price
-            })
-
+        
+        best_match = matched_products[0]
+        
+        product_history = df_prices[df_prices['product_name'] == best_match]
+        latest_data = product_history.iloc[-1]
+        prod_encoded = prod_encoder.transform([best_match])[0]
+        
+        question = pd.DataFrame(
+            [[today.day, today.weekday(), 0, prod_encoded, latest_data['price_hcm'], latest_data['price_hn']]], 
+            columns=['day', 'day_of_week', 'category_encoded', 'product_encoded', 'price_hcm', 'price_hn']
+        )
+        
+        predicted_price = int(price_model.predict(question)[0])
+        
         return {
             "success": True,
-            "source": "local_model",
-            "keyword": keyword,
-            "data": results
+            "product_name": best_match,
+            "price": str(predicted_price) 
         }
+        
     except Exception as e:
         return {"success": False, "error": str(e)}

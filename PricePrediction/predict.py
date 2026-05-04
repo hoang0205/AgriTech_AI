@@ -29,7 +29,6 @@ def predict_future_price():
     day = today.day
     day_of_week = today.weekday()
     
-    # Tạo một dictionary để lưu giá của từng mặt hàng
     price_report = {}
 
     for product_name in matched_products:
@@ -55,7 +54,6 @@ def predict_future_price():
         print("Dữ liệu bị lỗi, không thể dự đoán.")
         return
 
-    # Sắp xếp từ rẻ nhất đến đắt nhất
     sorted_report = sorted(price_report.items(), key=lambda x: x[1])
     
     min_price = sorted_report[0][1]
@@ -71,7 +69,6 @@ def predict_future_price():
         print("\n📋 Bảng giá dự đoán chi tiết:")
 
     for name, price in sorted_report:
-        # Nếu có từ khóa tìm kiếm, bôi đậm nó lên cho dễ nhìn (ở đây in hoa)
         print(f"  + {name}: {price:,.0f} VNĐ/kg")
         
     print("==================================================")

@@ -2,6 +2,7 @@ fastapi
 uvicorn
 pydantic
 tensorflow
+keras
 Pillow
 numpy
 requests
