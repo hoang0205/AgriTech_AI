@@ -4,7 +4,6 @@ import requests
 import joblib
 import pandas as pd
 import numpy as np
-import tensorflow as tf
 from PIL import Image
 from datetime import datetime
 import google.generativeai as genai
@@ -12,6 +11,9 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+
+# THÊM THƯ VIỆN CỦA HUGGING FACE CHO CLIP
+from transformers import pipeline
 
 load_dotenv()
 
@@ -27,19 +29,22 @@ app.add_middleware(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-
+print("Đang tải Zero-shot model (CLIP)... Quá trình này sẽ hơi lâu ở lần chạy đầu tiên!")
 try:
-    image_model_path = os.path.join(BASE_DIR, "ImageDetection", "keras_model.h5")
-    label_path = os.path.join(BASE_DIR, "ImageDetection", "labels.txt")
+    image_classifier = pipeline("zero-shot-image-classification", model="openai/clip-vit-base-patch32")
     
-    image_model = tf.keras.models.load_model(image_model_path, compile=False)
-    with open(label_path, "r", encoding="utf-8") as f:
-        labels = [line.strip() for line in f.readlines()]
-    print("Nạp thành công mô hình Nhận diện ảnh!")
+    DEFAULT_LABELS = [
+    "vegetables",                                        
+    "fruits",                                          
+    "raw meat",                                         
+    "seafood and fish",                                  
+    "agricultural products like rice, beans, or coffee",  
+    "non-food items, objects, vehicles, or people"      
+]
+    print("Đã nạp thành công mô hình Nhận diện ảnh CLIP!")
 except Exception as e:
-    print(f"Lỗi tải mô hình Nhận diện ảnh: {e}")
+    print(f"Lỗi tải mô hình CLIP: {e}")
 
-# Setup Gemini
 API_KEY = os.getenv("GENAI_API_KEY")
 if not API_KEY:
     print("Chưa tìm thấy file .env!")
@@ -55,11 +60,9 @@ try:
     prod_encoder = joblib.load(os.path.join(PRICE_DIR, 'product_encoder.pkl'))
     df_prices = pd.read_csv(os.path.join(PRICE_DIR, 'market_prices.csv'))
     product_dict = {str(item).lower(): str(item) for item in prod_encoder.classes_}
-    print("✅ Đã nạp thành công mô hình Dự đoán giá!")
+    print("Đã nạp thành công mô hình Dự đoán giá!")
 except Exception as e:
-    print(f"Lỗi tải mô hình Dự đoán giá: {e}")
-
-
+    print(f"Lỗi tải mô hình dự đoán giá: {e}")
 
 class ImageRequest(BaseModel):
     image_url: str
@@ -69,32 +72,24 @@ class PriceQueryRequest(BaseModel):
 
 @app.get("/")
 def home():
-    return {"message": "AgriTech AI Server is running (Image Detection + Price Prediction)!"}
-
-def preprocess_image(image_bytes):
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    image = image.resize((224, 224))
-    img_array = np.array(image) / 255.0
-    img_array = np.expand_dims(img_array, axis=0)
-    return img_array
+    return {"message": "AgriTech AI Server is running (Zero-Shot CLIP + Price Prediction)!"}
 
 @app.post("/api/predict-image")
 async def predict_image(request: ImageRequest):
     try:
         response = requests.get(request.image_url)
         response.raise_for_status() 
-        contents = response.content
         
-        img_array = preprocess_image(contents)
+        image = Image.open(io.BytesIO(response.content)).convert("RGB")
         
-        predictions = image_model.predict(img_array)
-        score = tf.nn.softmax(predictions[0])
-        class_idx = np.argmax(score)
+        results = image_classifier(image, candidate_labels=DEFAULT_LABELS)
+        
+        best_match = results[0]
         
         return {
             "success": True,
-            "label": labels[class_idx],
-            "confidence": float(np.max(score))
+            "label": best_match['label'],
+            "confidence": float(best_match['score'])
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -108,14 +103,10 @@ async def predict_price(request: PriceQueryRequest):
 
         if not matched_products:
             search_prompt = f"""
-            Từ khóa: '{keyword}'.
-            Nhiệm vụ 1: Kiểm tra xem đây có đúng là tên một loại thực phẩm, nông sản, thịt, cá, hải sản hoặc rau củ quả không. 
-            Nếu KHÔNG PHẢI (ví dụ: đồ điện tử, đồ gia dụng, từ vô nghĩa, từ bậy bạ...), hãy trả về ĐÚNG 1 TỪ: INVALID
-            
-            Nhiệm vụ 2: Nếu ĐÚNG là nông sản/thực phẩm, hãy ước tính giá bán lẻ hiện hành tại Việt Nam (VNĐ/kg).
-            LUẬT TỐI THƯỢNG: CHỈ in ra một con số hoặc một khoảng số. 
-            Ví dụ đúng: '50000' hoặc '55000 - 60000'
-            TUYỆT ĐỐI KHÔNG in chữ 'VNĐ', KHÔNG in 'kg', KHÔNG giải thích gì thêm.
+            Đánh giá từ khóa: '{keyword}'
+            Quy tắc 1 (Ưu tiên cao nhất): Nếu từ khóa KHÔNG PHẢI là thực phẩm, nông sản, thịt cá, gia vị hoặc rau củ (ví dụ: điện thoại, quần áo, xe máy, đồ vật, tên riêng...), BẮT BUỘC trả về đúng 1 chữ: INVALID.
+            Quy tắc 2: NẾU VÀ CHỈ NẾU từ khóa là thực phẩm/nông sản, hãy ước tính giá bán lẻ tại Việt Nam và CHỈ trả về con số (ví dụ: 50000 hoặc 40000-50000).
+            Tuyệt đối không giải thích, không in thêm chữ nào khác.
             """
             reply = chat_model.generate_content(search_prompt).text.strip()
 
@@ -132,7 +123,6 @@ async def predict_price(request: PriceQueryRequest):
             }
 
         today = datetime.now()
-        
         best_match = matched_products[0]
         
         product_history = df_prices[df_prices['product_name'] == best_match]
