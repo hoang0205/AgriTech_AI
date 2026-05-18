@@ -7,12 +7,11 @@ import numpy as np
 from PIL import Image
 from datetime import datetime
 import google.generativeai as genai
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-# THÊM THƯ VIỆN CỦA HUGGING FACE CHO CLIP
 from transformers import pipeline
 
 load_dotenv()
@@ -29,7 +28,6 @@ app.add_middleware(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-print("Đang tải Zero-shot model (CLIP)... Quá trình này sẽ hơi lâu ở lần chạy đầu tiên!")
 try:
     image_classifier = pipeline("zero-shot-image-classification", model="openai/clip-vit-base-patch32")
     
@@ -38,7 +36,7 @@ try:
     "fruits",                                          
     "raw meat",                                         
     "seafood and fish",                                  
-    "agricultural products like rice, beans, or coffee",  
+    "rice grains, roasted coffee beans, nuts, and seeds",
     "non-food items, objects, vehicles, or people"      
 ]
     print("Đã nạp thành công mô hình Nhận diện ảnh CLIP!")
@@ -75,21 +73,25 @@ def home():
     return {"message": "AgriTech AI Server is running (Zero-Shot CLIP + Price Prediction)!"}
 
 @app.post("/api/predict-image")
-async def predict_image(request: ImageRequest):
+async def predict_image(file: UploadFile = File(...)):
     try:
-        response = requests.get(request.image_url)
-        response.raise_for_status() 
-        
-        image = Image.open(io.BytesIO(response.content)).convert("RGB")
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents)).convert("RGB")
         
         results = image_classifier(image, candidate_labels=DEFAULT_LABELS)
-        
-        best_match = results[0]
+        best_match_en = results[0]['label']
+        confidence = float(results[0]['score'])
+
+        if best_match_en == "non-food items, objects, vehicles, or people":
+            return {
+                "success": False,
+                "error": "Ảnh không hợp lệ. Vui lòng chụp đúng nông sản/thực phẩm."
+            }
         
         return {
             "success": True,
-            "label": best_match['label'],
-            "confidence": float(best_match['score'])
+            "label": best_match_en,
+            "confidence": confidence
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
