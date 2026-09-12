@@ -1,13 +1,13 @@
+import io
 import os
 import re
 from typing import Dict, List
 import uuid
 import chromadb
 from chromadb.utils import embedding_functions
-from dotenv import load_dotenv
-import google.generativeai as genai
-
-load_dotenv()
+import docx2txt
+import ollama
+from pypdf import PdfReader
 
 
 class DocumentProcessor:
@@ -94,11 +94,6 @@ class VectorDatabase:
       return ""
 
 
-import io
-import docx2txt
-from pypdf import PdfReader
-
-
 def extract_text_from_file(file_bytes: bytes, filename: str) -> str:
   """Trích xuất text từ nhiều định dạng file khác nhau."""
   filename_lower = filename.lower()
@@ -124,10 +119,52 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> str:
 
 class RAGChatbot:
 
-  def __init__(self):
-    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-    self.model = genai.GenerativeModel("gemini-1.5-flash-latest")
+  def __init__(self, model_name: str = "qwen2.5:7b"):
+    self.model_name = model_name
     self.sessions: Dict[str, List[dict]] = {}
+
+  def generate_answer_stream(
+      self,
+      query: str,
+      product_name: str,
+      context: str,
+      session_id: str = "default",
+  ):
+    if session_id not in self.sessions:
+      self.sessions[session_id] = []
+
+    system_prompt = f"""Bạn là Chuyên gia Cố vấn Nông sản & Dinh dưỡng của sàn thương mại điện tử AgriTech.
+Khách hàng đang xem sản phẩm: "{product_name}".
+
+QUY TẮC:
+1. Ưu tiên sử dụng thông tin trong "CẨM NANG THAM KHẢO" nếu có nội dung liên quan.
+2. Nếu Cẩm nang không đề cập hoặc thiếu thông tin, hãy dùng kiến thức chuyên sâu của bạn về ẩm thực, dinh dưỡng, mẹo chọn quả và bảo quản để giải đáp tận tình.
+3. Không trả lời hoặc can thiệp vào giá bán, số lượng tồn kho hay đặt hàng (đây là việc giữa người mua và người bán tự trao đổi).
+4. Trả lời bằng tiếng Việt tự nhiên, thân thiện và mạch lạc.
+
+CẨM NANG THAM KHẢO:
+{context}"""
+
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(self.sessions[session_id][-6:])
+    messages.append({"role": "user", "content": query})
+
+    response_stream = ollama.chat(
+        model=self.model_name, messages=messages, stream=True
+    )
+
+    accumulated_text = []
+    for chunk in response_stream:
+      content = chunk.get("message", {}).get("content", "")
+      if content:
+        accumulated_text.append(content)
+        yield content
+
+    full_reply = "".join(accumulated_text)
+    self.sessions[session_id].append({"role": "user", "content": query})
+    self.sessions[session_id].append(
+        {"role": "assistant", "content": full_reply}
+    )
 
   def generate_answer(
       self,
@@ -136,33 +173,6 @@ class RAGChatbot:
       context: str,
       session_id: str = "default",
   ) -> str:
-    if session_id not in self.sessions:
-      self.sessions[session_id] = []
-
-    recent_history = self.sessions[session_id][-6:]
-    chat = self.model.start_chat(history=recent_history)
-
-    prompt = f"""
-Bạn là Chuyên gia Cố vấn Nông sản & Dinh dưỡng của sàn TMĐT AgriTech.
-Khách hàng đang xem nông sản: "{product_name}".
-
-QUY TẮC PHẢN HỒI (LINH HOẠT):
-1. Ưu tiên sử dụng thông tin trong "CẨM NANG THAM KHẢO" nếu có nội dung liên quan.
-2. Nếu Cẩm nang không đề cập hoặc thiếu thông tin, hãy dùng kiến thức chuyên sâu của bạn về ẩm thực, dinh dưỡng, mẹo chọn quả và bảo quản để giải đáp tận tình cho khách.
-3. Không trả lời hoặc can thiệp vào giá bán, số lượng tồn kho hay đặt hàng (đây là việc giữa người mua và người bán tự trao đổi).
-4. Giọng điệu thân thiện, tự nhiên, hữu ích cho người tiêu dùng.
-
-CẨM NANG THAM KHẢO:
-{context}
-
-CÂU HỎI CỦA KHÁCH:
-{query}
-"""
-    response = chat.send_message(prompt)
-
-    self.sessions[session_id].append({"role": "user", "parts": [query]})
-    self.sessions[session_id].append(
-        {"role": "model", "parts": [response.text]}
+    return "".join(
+        self.generate_answer_stream(query, product_name, context, session_id)
     )
-
-    return response.text
