@@ -1,0 +1,5 @@
+Chính sách hỗ trợ giá nông sản của AgriTech:
+- Lúa gạo: Hỗ trợ thu mua lúa ST25 với giá sàn là 10.000 VNĐ/kg trong mùa vụ Đông Xuân.
+- Sầu riêng: Sầu riêng Ri6 đạt chuẩn xuất khẩu sẽ được AgriTech hỗ trợ bao tiêu với giá 80.000 VNĐ/kg.
+- Cà phê: Thu mua cà phê Robusta chuẩn hữu cơ với giá 65.000 VNĐ/kg, yêu cầu độ ẩm dưới 12.5%.
+Ứng dụng AgriTech còn cung cấp tính năng AI dự báo giá dựa trên xu hướng thị trường để bà con nông dân có thể chốt giá bán tốt nhất.
