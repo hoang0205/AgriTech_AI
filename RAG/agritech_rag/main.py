@@ -11,9 +11,7 @@ from rag_pipeline import (
 app = FastAPI(title="AgriTech AI Advisor API (Qwen 2.5)")
 
 vector_db = VectorDatabase()
-chatbot = RAGChatbot(
-    model_name="qwen2.5:7b"
-)  
+chatbot = RAGChatbot(model_name="qwen2.5:3b")
 processor = DocumentProcessor(max_words=80, overlap_words=15)
 
 

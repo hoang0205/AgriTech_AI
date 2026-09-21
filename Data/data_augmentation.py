@@ -3,8 +3,7 @@ import os
 import time
 import google.generativeai as genai
 
-genai.configure(api_key="AIzaSyCG8YKTzqwezpg86dN5SogAun_p6iDiQ6Q")
-
+genai.configure(api_key=GEMINI_API_KEY)  
 model = genai.GenerativeModel('gemini-2.5-flash')
 
 def augment_description(ten_sp, danh_muc, mo_ta_goc):

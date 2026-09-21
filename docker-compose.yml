@@ -1,23 +1,24 @@
 version: '3.8'
 
 services:
-  agritech-api:
+  ollama_service:
+    image: ollama/ollama:latest
+    container_name: agritech_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - E:/ollama_models:/root/.ollama
+    restart: always
+
+  agritech_ai:
     build: .
-    image: agritech-api:latest
-    container_name: agritech-api-container
+    container_name: agritech_ai_backend
     ports:
       - "8000:8000"
-    env_file:
-      - .env
+    environment:
+      - OLLAMA_HOST=http://ollama_service:11434
     volumes:
-      - hf_model_cache:/root/.cache/huggingface
-      - .:/app
+      - ./chroma_db:/app/chroma_db
+    depends_on:
+      - ollama_service
     restart: always
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-volumes:
-  hf_model_cache:
