@@ -2,12 +2,14 @@ from datetime import datetime
 import io
 import os
 from dotenv import load_dotenv
+import json
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import google.generativeai as genai
 import joblib
 import numpy as np
+from typing import List
 import sqlite3
 import pandas as pd
 from PIL import Image
@@ -90,6 +92,9 @@ processor = DocumentProcessor(max_words=250, overlap_words=30)
 class PriceQueryRequest(BaseModel):
   product_name: str
 
+class ProductDescriptionRequest(BaseModel):
+  product_name: str
+  category: str
 
 class ProductAdviceRequest(BaseModel):
   query: str
@@ -97,6 +102,31 @@ class ProductAdviceRequest(BaseModel):
   user_id: str = "guest"
   session_id: str | None = None
 
+class ReviewSummarizeRequest(BaseModel):
+    product_name: str
+    reviews: List[str]
+
+def query_qwen_for_summary(prompt: str, model_name: str = "qwen2.5:3b") -> str:
+    """Gọi Ollama nội bộ để sinh JSON tóm tắt đánh giá"""
+    try:
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": model_name,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.2
+                }
+            },
+            timeout=25
+        )
+        if response.status_code == 200:
+            return response.json().get("response", "").strip()
+        return ""
+    except Exception as e:
+        print(f"Lỗi gọi Ollama: {e}")
+        return ""
 
 @app.get("/")
 def home():
@@ -312,6 +342,127 @@ def get_indexed_files():
   except Exception as e:
     raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/generate-description")
+async def generate_product_description(request: ProductDescriptionRequest):
+  try:
+    user_prompt = (
+        f"Tên sản phẩm: {request.product_name}\nDanh mục: {request.category}"
+    )
+
+    response = requests.post(
+        "http://localhost:11434/api/generate",
+        json={
+            "model": "agritech-desc",
+            "prompt": user_prompt,
+            "stream": False,
+        },
+        timeout=60,
+    )
+
+    if response.status_code != 200:
+      raise HTTPException(
+          status_code=500, detail=f"Lỗi từ Ollama Service: {response.text}"
+      )
+
+    data = response.json()
+    description = data.get("response", "").strip()
+
+    return {
+        "success": True,
+        "product_name": request.product_name,
+        "category": request.category,
+        "description": description,
+    }
+  except requests.exceptions.ConnectionError:
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            "Không thể kết nối đến Ollama. Hãy chắc chắn Ollama đang chạy trên"
+            " máy (port 11434)."
+        ),
+    )
+  except Exception as e:
+    raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/generate-description/stream")
+async def generate_product_description_stream(
+    request: ProductDescriptionRequest,
+):
+  user_prompt = (
+      f"Tên sản phẩm: {request.product_name}\nDanh mục: {request.category}"
+  )
+
+  def stream_generator():
+    try:
+      with requests.post(
+          "http://localhost:11434/api/generate",
+          json={
+              "model": "agritech-desc",
+              "prompt": user_prompt,
+              "stream": True,
+          },
+          stream=True,
+          timeout=60,
+      ) as res:
+        for line in res.iter_lines():
+          if line:
+            chunk = json.loads(line)
+            yield chunk.get("response", "")
+    except Exception as e:
+      yield f"\n[Lỗi kết nối Ollama: {str(e)}]"
+
+  return StreamingResponse(
+      stream_generator(), media_type="text/plain; charset=utf-8"
+  )
+
+@app.post("/api/summarize-reviews")
+async def summarize_reviews_endpoint(request: ReviewSummarizeRequest):
+    if not request.reviews:
+        return {"success": False, "error": "Chưa có đánh giá nào để tóm tắt."}
+
+    review_text = "\n".join([f"- {r}" for r in request.reviews[:15]])
+
+    prompt = f"""<|im_start|>system
+Bạn là trợ lý sàn nông sản AgriTech. Hãy đọc các đánh giá của khách hàng về sản phẩm '{request.product_name}' và phân loại chính xác thành ƯU ĐIỂM và NHƯỢC ĐIỂM thực tế.
+
+Quy tắc:
+1. Chỉ dựa trên phản hồi có thật của khách, tuyệt đối không tự bịa đặt.
+2. Mỗi ý phải ngắn gọn, súc tích (dưới 15 từ).
+3. Số lượng ý: Trích xuất từ 1 đến tối đa 4 ý thực tế nhất cho mỗi mục. Nếu khách hàng không chê hoặc không có điểm lưu ý nào, mục "cons" BẮT BUỘC để mảng rỗng [].
+4. BẮT BUỘC trả về đúng định dạng JSON sau:
+{{
+  "pros": [
+    "Ý điểm mạnh thực tế trích từ đánh giá (tối đa 4 ý)"
+  ],
+  "cons": [
+    "Ý điểm yếu/lưu ý thực tế (để trống [] nếu không ai chê)"
+  ]
+}}
+Không viết thêm văn bản giải thích nào khác ngoài chuỗi JSON trên.
+<|im_end|>
+<|im_start|>user
+Danh sách đánh giá:
+{review_text}
+<|im_end|>
+<|im_start|>assistant
+"""
+    raw_output = query_qwen_for_summary(prompt, model_name="qwen2.5:3b")
+
+    try:
+        start_idx = raw_output.find('{')
+        end_idx = raw_output.rfind('}') + 1
+        if start_idx != -1 and end_idx != 0:
+            json_str = raw_output[start_idx:end_idx]
+            data = json.loads(json_str)
+            return {
+                "success": True,
+                "pros": data.get("pros", []),
+                "cons": data.get("cons", [])
+            }
+        return {"success": False, "error": "AI không trả về JSON đúng cấu trúc."}
+    except Exception as e:
+        return {"success": False, "error": f"Lỗi parse JSON: {str(e)}"}
 
 if __name__ == "__main__":
   import uvicorn
